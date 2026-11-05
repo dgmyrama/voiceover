@@ -1,6 +1,7 @@
 name = "tools-ngisi-suara-api"
 main = "worker.js"
 compatibility_date = "2026-11-05"
+keep_vars = true
 
 [vars]
 ALLOWED_ORIGIN = "https://dgmyrama.github.io"
