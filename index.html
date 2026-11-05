@@ -139,7 +139,30 @@
                     <select id="providerSelect" onchange="handleProviderChange()" class="w-full sm:w-64 p-3 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-slate-800 dark:text-gray-200 text-sm font-semibold focus:ring-2 focus:ring-red-500 outline-none">
                         <option value="gemini">Google Gemini</option>
                         <option value="cartesia">Cartesia Sonic</option>
+                        <option value="elevenlabs">ElevenLabs</option>
                     </select>
+                </div>
+                <div id="elevenLabsControls" class="hidden space-y-3 p-3 rounded-xl bg-violet-500/5 border border-violet-500/20">
+                    <div>
+                        <label for="elevenModelSelect" class="block text-xs font-bold uppercase tracking-wider text-violet-500 mb-2">Model ElevenLabs</label>
+                        <select id="elevenModelSelect" class="w-full p-3 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-sm">
+                            <option value="eleven_flash_v2_5">Flash v2.5 — hemat kredit (rekomendasi)</option>
+                            <option value="eleven_v4">Eleven v4 — ekspresif</option>
+                            <option value="eleven_v4_turbo">Eleven v4 Turbo — cepat & ekspresif</option>
+                            <option value="eleven_multilingual_v2">Multilingual v2 — kualitas natural</option>
+                            <option value="eleven_v3">Eleven v3 — ekspresif</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <label>Stability <span id="elevenStabilityValue">50%</span><input id="elevenStability" type="range" min="0" max="1" step="0.05" value="0.5" class="w-full"></label>
+                        <label>Similarity boost <span id="elevenSimilarityValue">75%</span><input id="elevenSimilarity" type="range" min="0" max="1" step="0.05" value="0.75" class="w-full"></label>
+                        <label>Style <span id="elevenStyleValue">0%</span><input id="elevenStyle" type="range" min="0" max="1" step="0.05" value="0" class="w-full"></label>
+                        <label>Kecepatan <span id="elevenSpeedValue">1.00x</span><input id="elevenSpeed" type="range" min="0.7" max="1.2" step="0.05" value="1" class="w-full"></label>
+                    </div>
+                    <label class="flex items-center gap-2 text-xs"><input id="elevenSpeakerBoost" type="checkbox" checked> Speaker boost</label>
+                    <div id="elevenUsageInfo" class="text-xs rounded-lg bg-white/70 dark:bg-gray-900/60 p-3">Memuat informasi kuota ElevenLabs...</div>
+                    <p id="elevenEstimate" class="text-xs text-slate-500">Estimasi kredit akan muncul saat Anda mengetik naskah.</p>
+                    <button type="button" onclick="refreshElevenUsage()" class="text-xs font-semibold text-violet-600 underline">Perbarui informasi kuota</button>
                 </div>
                 <div id="cartesiaModelContainer" class="hidden">
                     <label for="cartesiaModelSelect" class="block text-xs font-bold uppercase tracking-wider text-red-500 mb-2">Model Cartesia</label>
@@ -489,6 +512,91 @@
             return await response.blob();
         }
 
+        let elevenVoiceList = [];
+        let elevenUsage = null;
+        const elevenModelSelect = document.getElementById('elevenModelSelect');
+        const elevenControls = document.getElementById('elevenLabsControls');
+        const elevenUsageInfo = document.getElementById('elevenUsageInfo');
+        const elevenEstimate = document.getElementById('elevenEstimate');
+        const elevenRangeIds = ['elevenStability','elevenSimilarity','elevenStyle','elevenSpeed'];
+        elevenRangeIds.forEach(id => document.getElementById(id).addEventListener('input', () => {
+            const value = document.getElementById(id).value;
+            const label = id === 'elevenSpeed' ? `${Number(value).toFixed(2)}x` : `${Math.round(Number(value)*100)}%`;
+            document.getElementById(id.replace('eleven','eleven')+'Value').textContent = label;
+        }));
+        function estimateElevenCredits(text) {
+            const model = elevenModelSelect.value;
+            return Math.ceil((text || '').length * (model === 'eleven_flash_v2_5' ? 0.5 : 1));
+        }
+        function updateElevenEstimate() {
+            if (!elevenEstimate) return;
+            const text = currentMode === 'single' ? voText.value.trim() : [...document.querySelectorAll('.text-line-input')].map(x => x.value.trim()).join('');
+            const credits = estimateElevenCredits(text);
+            elevenEstimate.textContent = `Naskah: ${text.length.toLocaleString('id-ID')} karakter • estimasi ${credits.toLocaleString('id-ID')} kredit (${elevenModelSelect.value === 'eleven_flash_v2_5' ? 'Flash API ±0,5 kredit/karakter' : '±1 kredit/karakter'}). Estimasi, bukan tagihan final.`;
+        }
+        async function refreshElevenUsage() {
+            try {
+                const response = await workerFetch('/api/elevenlabs/usage');
+                elevenUsage = await response.json();
+                const used = Number(elevenUsage.character_count || 0);
+                const limit = Number(elevenUsage.character_limit || 0);
+                const remaining = Math.max(0, limit - used);
+                const reset = elevenUsage.next_character_count_reset_unix ? new Date(elevenUsage.next_character_count_reset_unix * 1000).toLocaleDateString('id-ID') : 'sesuai siklus akun';
+                elevenUsageInfo.textContent = `Paket: ${elevenUsage.tier || '—'} • Terpakai: ${used.toLocaleString('id-ID')} / ${limit.toLocaleString('id-ID')} • Perkiraan sisa: ${remaining.toLocaleString('id-ID')} kredit • Reset: ${reset}.`;
+            } catch (e) {
+                elevenUsageInfo.textContent = 'Kuota belum dapat dibaca: ' + e.message + '. Penggunaan tetap dibatasi oleh ElevenLabs.';
+            }
+            updateElevenEstimate();
+        }
+        async function loadElevenVoices() {
+            const response = await workerFetch('/api/elevenlabs/voices');
+            const result = await response.json();
+            elevenVoiceList = Array.isArray(result.voices) ? result.voices : [];
+            if (!elevenVoiceList.length) throw new Error('Daftar suara ElevenLabs kosong.');
+            refreshVoiceControls();
+        }
+        async function elevenLabsTTS(text, voiceId) {
+            const response = await workerFetch('/api/elevenlabs/tts', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text, voiceId, modelId: elevenModelSelect.value,
+                    stability: document.getElementById('elevenStability').value,
+                    similarityBoost: document.getElementById('elevenSimilarity').value,
+                    style: document.getElementById('elevenStyle').value,
+                    speed: document.getElementById('elevenSpeed').value,
+                    useSpeakerBoost: document.getElementById('elevenSpeakerBoost').checked
+                })
+            });
+            const blob = await response.blob();
+            refreshElevenUsage();
+            return blob;
+        }
+        async function concatMp3BlobsToWav(blobs) {
+            if (blobs.length === 1) return blobs[0];
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            const ctx = new AudioCtx();
+            try {
+                const decoded = await Promise.all(blobs.map(async b => ctx.decodeAudioData(await b.arrayBuffer())));
+                const rate = decoded[0].sampleRate;
+                const channels = Math.max(...decoded.map(b => b.numberOfChannels));
+                const silenceFrames = Math.round(rate * 0.12);
+                const totalFrames = decoded.reduce((n,b) => n + b.length, 0) + silenceFrames * (decoded.length - 1);
+                const pcm = new ArrayBuffer(44 + totalFrames * channels * 2);
+                const view = new DataView(pcm);
+                const write = (o,t) => [...t].forEach((c,i)=>view.setUint8(o+i,c.charCodeAt(0)));
+                write(0,'RIFF'); view.setUint32(4,36+totalFrames*channels*2,true); write(8,'WAVE'); write(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,channels,true); view.setUint32(24,rate,true); view.setUint32(28,rate*channels*2,true); view.setUint16(32,channels*2,true); view.setUint16(34,16,true); write(36,'data'); view.setUint32(40,totalFrames*channels*2,true);
+                let frame = 0;
+                decoded.forEach((audio, index) => {
+                    for (let i=0;i<audio.length;i++) for (let ch=0;ch<channels;ch++) {
+                        const sample = audio.getChannelData(Math.min(ch,audio.numberOfChannels-1))[i];
+                        view.setInt16(44+(frame*channels+ch)*2, Math.max(-1,Math.min(1,sample))*32767, true);
+                    }
+                    frame += audio.length + (index < decoded.length-1 ? silenceFrames : 0);
+                });
+                return new Blob([pcm], {type:'audio/wav'});
+            } finally { await ctx.close(); }
+        }
+
         async function loadCartesiaVoices() {
             const langCode = languageCodeMap[languageSelect.value] || 'id';
             const response = await workerFetch(`/api/cartesia/voices?limit=100&language=${encodeURIComponent(langCode)}`);
@@ -511,10 +619,10 @@
 
         function getActiveVoiceList() {
             if (providerSelect && providerSelect.value === 'cartesia') {
-                return cartesiaVoiceList.map(v => ({
-                    val: v.id,
-                    label: `${v.name || 'Voice'}${v.tagline ? ' — ' + v.tagline : ''}`
-                }));
+                return cartesiaVoiceList.map(v => ({ val: v.id, label: `${v.name || 'Voice'}${v.tagline ? ' — ' + v.tagline : ''}` }));
+            }
+            if (providerSelect && providerSelect.value === 'elevenlabs') {
+                return elevenVoiceList.map(v => ({ val: v.voice_id, label: `${v.name || 'Voice'}${v.category ? ' — ' + v.category : ''}` }));
             }
             return voiceList;
         }
@@ -544,31 +652,33 @@
         function updateToneHelp() {
             if (!toneHelp) return;
             toneHelp.textContent = providerSelect.value === 'cartesia'
-                ? 'Cartesia Sonic menerima arahan emosi untuk membantu prosodi. Natural membiarkan Sonic membaca emosi dari naskah. Efek tiap preset dapat berbeda menurut voice, model, dan bahasa; Lembut/ASMR bukan jaminan bisikan literal.'
-                : 'Pilih karakter pembawaan untuk mengarahkan hasil suara Gemini.';
+                ? 'Cartesia Sonic menerima arahan emosi untuk membantu prosodi. Natural membiarkan Sonic membaca emosi dari naskah.'
+                : providerSelect.value === 'elevenlabs'
+                    ? 'ElevenLabs memakai pengaturan Stability, Similarity, Style, dan Speed di panel provider. Tone preset tetap menjadi panduan visual; pengaruh utamanya diatur melalui slider.'
+                    : 'Pilih karakter pembawaan untuk mengarahkan hasil suara Gemini.';
         }
 
         async function handleProviderChange() {
             updateToneHelp();
-            const isCartesia = providerSelect.value === 'cartesia';
+            const provider = providerSelect.value;
+            const isCartesia = provider === 'cartesia';
+            const isEleven = provider === 'elevenlabs';
             cartesiaModelContainer.classList.toggle('hidden', !isCartesia);
+            elevenControls.classList.toggle('hidden', !isEleven);
             providerInfo.textContent = isCartesia
                 ? 'Cartesia digunakan untuk TTS, dialog multi-suara, transkripsi, dan Voice Changer. Refine Text tetap menggunakan Gemini.'
-                : 'Gemini digunakan untuk TTS, dialog, transkripsi, voice-to-voice, dan Refine Text.';
+                : isEleven
+                    ? 'ElevenLabs digunakan untuk TTS dan dialog multi-suara. Transkripsi dan Refine Text tetap menggunakan Gemini.'
+                    : 'Gemini digunakan untuk TTS, dialog, transkripsi, voice-to-voice, dan Refine Text.';
             if (isCartesia) {
-                try {
-                    if (!cartesiaVoiceList.length) {
-                        voiceSelect.innerHTML = '<option>Memuat suara Cartesia...</option>';
-                        await loadCartesiaVoices();
-                    } else refreshVoiceControls();
-                } catch (error) {
-                    refreshVoiceControls();
-                    updateStatus('Gagal memuat suara Cartesia: ' + error.message, 'text-red-500 font-semibold');
-                }
-            } else {
-                refreshVoiceControls();
-            }
+                try { if (!cartesiaVoiceList.length) { voiceSelect.innerHTML = '<option>Memuat suara Cartesia...</option>'; await loadCartesiaVoices(); } else refreshVoiceControls(); }
+                catch (error) { refreshVoiceControls(); updateStatus('Gagal memuat suara Cartesia: ' + error.message, 'text-red-500 font-semibold'); }
+            } else if (isEleven) {
+                try { if (!elevenVoiceList.length) { voiceSelect.innerHTML = '<option>Memuat suara ElevenLabs...</option>'; await loadElevenVoices(); } else refreshVoiceControls(); await refreshElevenUsage(); }
+                catch (error) { refreshVoiceControls(); updateStatus('Gagal memuat ElevenLabs: ' + error.message, 'text-red-500 font-semibold'); }
+            } else refreshVoiceControls();
             checkRefinementAvailability();
+            updateElevenEstimate();
         }
 
         const MAX_RETRIES = 5;
@@ -661,6 +771,8 @@
             toneSelect.innerHTML = optionsHtml;
         }
 
+        voText.addEventListener('input', updateElevenEstimate);
+        elevenModelSelect.addEventListener('change', updateElevenEstimate);
         languageSelect.addEventListener('change', async () => {
             if (providerSelect.value === 'cartesia') {
                 try { await loadCartesiaVoices(); }
@@ -727,7 +839,7 @@
             const chosenVoice = defaultVoice && activeVoices.some(v => v.val === defaultVoice)
                 ? defaultVoice : (activeVoices[0]?.val || '');
             const voiceOptions = activeVoices.map(v => `<option value="${escapeHtml(v.val)}" ${chosenVoice === v.val ? 'selected' : ''}>${escapeHtml(v.label)}</option>`).join('');
-            wrapper.innerHTML = `<div class="w-full md:w-1/3"><select class="voice-line-select w-full p-3 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-slate-800 dark:text-gray-200 text-xs font-semibold focus:ring-2 focus:ring-red-500 outline-none cursor-pointer truncate">${voiceOptions}</select></div><div class="w-full md:flex-grow"><textarea class="text-line-input w-full p-3 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-slate-800 dark:text-gray-200 text-xs focus:ring-2 focus:ring-red-500 outline-none transition" rows="2" placeholder="Tulis baris percakapan..."></textarea></div><button onclick="removeDialogLine('${lineId}')" class="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition self-end md:self-start"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>`;
+            wrapper.innerHTML = `<div class="w-full md:w-1/3"><select class="voice-line-select w-full p-3 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-slate-800 dark:text-gray-200 text-xs font-semibold focus:ring-2 focus:ring-red-500 outline-none cursor-pointer truncate">${voiceOptions}</select></div><div class="w-full md:flex-grow"><textarea oninput="updateElevenEstimate()" class="text-line-input w-full p-3 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-slate-800 dark:text-gray-200 text-xs focus:ring-2 focus:ring-red-500 outline-none transition" rows="2" placeholder="Tulis baris percakapan..."></textarea></div><button onclick="removeDialogLine('${lineId}')" class="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition self-end md:self-start"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>`;
             dialogLinesContainer.appendChild(wrapper);
         }
         function removeDialogLine(id) {
@@ -776,7 +888,7 @@
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = url;
-                a.download = `ngisisuara_${Date.now()}.wav`;
+                a.download = `ngisisuara_${Date.now()}.${currentAudioBlob.type && currentAudioBlob.type.includes('mpeg') ? 'mp3' : 'wav'}`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -844,6 +956,9 @@
                     });
                     text = sttJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
                     if (!text) throw new Error("No speech");
+                    if (providerSelect.value === 'elevenlabs') {
+                        wavBlob = await elevenLabsTTS(text, v2vTargetVoice.value);
+                    } else {
                     const ttsPayload = {
                         contents: [{ parts: [{ text }] }],
                         generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: v2vTargetVoice.value } } } },
@@ -853,6 +968,7 @@
                     const audioData = ttsJson.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
                     if (!audioData) throw new Error("Gemini tidak mengembalikan audio.");
                     wavBlob = pcmToWav(new Int16Array(base64ToArrayBuffer(audioData)), 24000);
+                    }
                 }
 
                 currentAudioBlob = wavBlob;
@@ -896,6 +1012,7 @@
         async function generateVoiceOver() {
             if (!requireApiKey()) return;
             let fullText = "", speechConfig = {}, lang = languageSelect.value, spd = speedMap[speedInput.value];
+            let dialogItems = [];
             let vHist = "", voiceIdHist = "", dScript = "", wavBlob = null;
             const provider = providerSelect.value;
 
@@ -912,7 +1029,7 @@
             } else {
                 const lines = document.querySelectorAll('.dialog-line');
                 if (lines.length===0) return;
-                let script = "", voices = new Set(), dialogItems = [];
+                let script = "", voices = new Set();
                 lines.forEach(l => {
                     const v = l.querySelector('.voice-line-select').value;
                     const t = l.querySelector('.text-line-input').value.trim();
@@ -934,7 +1051,19 @@
 
             updateTTSUIState(true); updateStatus('Sedang memproses audio...', 'text-red-500 font-medium');
             try {
-                if (provider === 'cartesia') {
+                if (provider === 'elevenlabs') {
+                    if (currentMode === 'single') {
+                        wavBlob = await elevenLabsTTS(fullText, voiceSelect.value);
+                    } else {
+                        const items = dialogItems;
+                        const audioParts = [];
+                        for (let i = 0; i < items.length; i++) {
+                            updateStatus(`Membuat dialog ElevenLabs (${i + 1}/${items.length})...`, 'text-violet-500 font-medium');
+                            audioParts.push(await elevenLabsTTS(items[i].text, items[i].voice));
+                        }
+                        wavBlob = await concatMp3BlobsToWav(audioParts);
+                    }
+                } else if (provider === 'cartesia') {
                     if (currentMode === 'single') {
                         wavBlob = await cartesiaTTS(fullText, voiceSelect.value, lang, cartesiaSpeed(), toneSelect.value);
                     } else {
@@ -974,7 +1103,7 @@
                         speed: speedInput.value, language: lang, provider,
                         isDialog: currentMode==='dialog',
                         duration: (wavBlob.size / (provider === 'cartesia' ? 88200 : 48000)).toFixed(1),
-                        timestamp: new Date().toLocaleDateString('id-ID'), audioBase64: b64
+                        timestamp: new Date().toLocaleDateString('id-ID'), audioBase64: b64, audioMimeType: wavBlob.type || (provider === 'elevenlabs' ? 'audio/mpeg' : 'audio/wav')
                     });
                 }
             } catch (e) {
@@ -1003,7 +1132,7 @@
         function playHistoryItem(id) {
             const item = loadHistory().find(i => i.id === id);
             if (item && item.audioBase64) {
-                const blob = base64ToBlob(item.audioBase64); audioPlayer.src = URL.createObjectURL(blob); audioPlayer.play();
+                const blob = base64ToBlob(item.audioBase64, item.audioMimeType || 'audio/wav'); audioPlayer.src = URL.createObjectURL(blob); audioPlayer.play();
                 statusMessage.classList.add('hidden'); audioControls.classList.remove('hidden'); 
                 resultContainer.classList.remove('flex', 'items-center', 'justify-center'); resultContainer.classList.add('block');
                 updateStatus(`Memutar: "${item.text}"`, 'text-blue-500 font-medium');
@@ -1025,6 +1154,9 @@
                 else if (item.provider === 'cartesia') {
                     const found = cartesiaVoiceList.find(v => v.name === savedVoice || v.id === savedVoice);
                     if (found) voiceSelect.value = found.id;
+                } else if (item.provider === 'elevenlabs') {
+                    const found = elevenVoiceList.find(v => v.name === savedVoice || v.voice_id === savedVoice);
+                    if (found) voiceSelect.value = found.voice_id;
                 } else voiceSelect.value = voiceNameToValueMap[savedVoice] || voiceSelect.value;
                 toneSelect.value = item.tone;
                 speedInput.value = item.speed;
@@ -1037,7 +1169,7 @@
         }
         function downloadHistoryItem(id) {
             const item = loadHistory().find(i => i.id === id);
-            if (item && item.audioBase64) { const blob = base64ToBlob(item.audioBase64); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.style.display = 'none'; a.href = url; a.download = `vo_${item.id}.wav`; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); }
+            if (item && item.audioBase64) { const blob = base64ToBlob(item.audioBase64, item.audioMimeType || 'audio/wav'); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.style.display = 'none'; a.href = url; a.download = `vo_${item.id}.${(item.audioMimeType || '').includes('mpeg') ? 'mp3' : 'wav'}`; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); }
         }
 
         function renderHistory() {
