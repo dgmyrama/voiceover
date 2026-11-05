@@ -189,6 +189,7 @@
                     <div class="p-5 bg-white dark:bg-gray-900/60 rounded-2xl border border-slate-200 dark:border-gray-800 shadow-sm">
                         <label for="tone" class="block text-xs font-bold uppercase tracking-wider text-red-500 mb-2">3. Gaya / Tone Suara</label>
                         <select id="tone" class="w-full p-3.5 bg-slate-50 dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl text-slate-800 dark:text-gray-200 text-sm font-medium focus:ring-2 focus:ring-red-500 outline-none transition cursor-pointer" onchange="checkRefinementAvailability()"></select>
+                        <p id="toneHelp" class="mt-2 text-xs text-slate-500 dark:text-gray-400 leading-relaxed">Gaya suara menjadi arahan untuk AI. Hasil akhirnya tetap dipengaruhi karakter voice dan isi naskah.</p>
                     </div>
                 </div>
 
@@ -387,7 +388,7 @@
     <script>
         // URL Cloudflare Worker. API Key Gemini dan Cartesia disimpan sebagai Secret di Cloudflare,
         // bukan di file HTML agar tidak terlihat oleh pengunjung website.
-        const WORKER_API_BASE = "https://tools-ngisi-suara-api.dgmyrama.workers.dev/";
+        const WORKER_API_BASE = "https://GANTI-DENGAN-URL-WORKER.workers.dev";
         const CARTESIA_API_VERSION = "2026-08-14";
         const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
         const GEMINI_TEXT_MODEL = "gemini-2.5-flash-preview-05-20";
@@ -432,11 +433,13 @@
             return Math.max(0.6, Math.min(1.5, 0.6 + ((value - 1) * 0.1)));
         }
 
+        // Preset aplikasi diterjemahkan ke emotion guidance yang dikenal Cartesia Sonic.
+        // Natural sengaja tidak mengirim emotion agar Sonic menentukan prosodi dari naskah.
         const cartesiaEmotionMap = {
-            natural: 'neutral', iklan: 'confident', vlogging: 'excited',
-            gembira: 'happy', bersemangat: 'enthusiastic', santai: 'calm',
+            iklan: 'confident', vlogging: 'enthusiastic',
+            gembira: 'happy', bersemangat: 'excited', santai: 'calm',
             bercerita: 'content', bangga: 'proud', serius: 'determined',
-            tenang: 'peaceful', persuasif: 'confident', misterius: 'mysterious',
+            tenang: 'serene', persuasif: 'confident', misterius: 'mysterious',
             puitis: 'wistful', sedih: 'sad', kecewa: 'disappointed',
             marah: 'angry', takut: 'scared', memohon: 'apologetic',
             berbisik: 'calm', sarkastik: 'sarcastic', terkejut: 'surprised'
@@ -450,7 +453,7 @@
                     transcript, voiceId,
                     language: languageCodeMap[language] || 'id',
                     speed: speed || cartesiaSpeed(),
-                    emotion: tone ? (cartesiaEmotionMap[tone] || 'neutral') : undefined,
+                    emotion: tone && tone !== 'natural' ? cartesiaEmotionMap[tone] : undefined,
                     modelId: cartesiaModelSelect.value
                 })
             });
@@ -538,7 +541,15 @@
             });
         }
 
+        function updateToneHelp() {
+            if (!toneHelp) return;
+            toneHelp.textContent = providerSelect.value === 'cartesia'
+                ? 'Cartesia Sonic menerima arahan emosi untuk membantu prosodi. Natural membiarkan Sonic membaca emosi dari naskah. Efek tiap preset dapat berbeda menurut voice, model, dan bahasa; Lembut/ASMR bukan jaminan bisikan literal.'
+                : 'Pilih karakter pembawaan untuk mengarahkan hasil suara Gemini.';
+        }
+
         async function handleProviderChange() {
+            updateToneHelp();
             const isCartesia = providerSelect.value === 'cartesia';
             cartesiaModelContainer.classList.toggle('hidden', !isCartesia);
             providerInfo.textContent = isCartesia
@@ -584,6 +595,7 @@
         const voiceSelect = document.getElementById('voice');
         const v2vTargetVoice = document.getElementById('v2vTargetVoice');
         const toneSelect = document.getElementById('tone');
+        const toneHelp = document.getElementById('toneHelp');
         const speedInput = document.getElementById('speed');
         const btnText = document.getElementById('btnText');
         const loadingSpinner = document.getElementById('loadingSpinner');
