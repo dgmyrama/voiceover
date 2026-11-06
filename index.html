@@ -564,9 +564,13 @@
                     similarityBoost: document.getElementById('elevenSimilarity').value,
                     style: document.getElementById('elevenStyle').value,
                     speed: document.getElementById('elevenSpeed').value,
-                    useSpeakerBoost: document.getElementById('elevenSpeakerBoost').checked
+                    useSpeakerBoost: document.getElementById('elevenSpeakerBoost').checked,
+                    language: languageSelect.value
                 })
             });
+            if (response.headers.get('X-TTS-Provider') === 'gemini') {
+                window.__elevenFallbackUsed = true;
+            }
             const blob = await response.blob();
             refreshElevenUsage();
             return blob;
@@ -1049,6 +1053,7 @@
                 if (provider === 'cartesia') window.__cartesiaDialogItems = dialogItems;
             }
 
+            window.__elevenFallbackUsed = false;
             updateTTSUIState(true); updateStatus('Sedang memproses audio...', 'text-red-500 font-medium');
             try {
                 if (provider === 'elevenlabs') {
@@ -1100,7 +1105,8 @@
                         id: Date.now(), text: titleText,
                         fullText: currentMode==='single' ? voText.value : dScript,
                         voice: vHist, voiceId: voiceIdHist, tone: currentMode==='single' ? toneSelect.value : "Conversational",
-                        speed: speedInput.value, language: lang, provider,
+                        speed: speedInput.value, language: lang,
+                        provider: provider === 'elevenlabs' && window.__elevenFallbackUsed ? 'elevenlabs → gemini fallback' : provider,
                         isDialog: currentMode==='dialog',
                         duration: (wavBlob.size / (provider === 'cartesia' ? 88200 : 48000)).toFixed(1),
                         timestamp: new Date().toLocaleDateString('id-ID'), audioBase64: b64, audioMimeType: wavBlob.type || (provider === 'elevenlabs' ? 'audio/mpeg' : 'audio/wav')
